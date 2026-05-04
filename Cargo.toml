@@ -1,0 +1,11 @@
+[package]
+name = "dron_det"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand = "0.8.5"
+image = "0.25"
+glam = "0.29"
+rayon = "1"
+euclid = "0.22.14"
