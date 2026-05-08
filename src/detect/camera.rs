@@ -9,8 +9,8 @@ pub struct Camera {
     pub rot: Vec3,
     pub fov: f32,
     pub frames: Vec<PathBuf>,
-    pub sensitivity: u8,
-    pub ratio: f32,
+    pub sensitivity: f32,
+   
 }
 
 impl Camera {
@@ -80,8 +80,8 @@ impl Camera {
             },
             fov: fov?,
             frames,
-            sensitivity: 2,
-            ratio: 16.0 / 9.0,
+            sensitivity: 0.01,// how many pixels of a image can be made to rays
+          
         })
     }
 
@@ -89,7 +89,7 @@ impl Camera {
         &self,
         current_frame: usize,
         frame_delay: usize,
-    ) -> Result<RgbImage, String> {
+    ) -> Result<(RgbImage,u32), String> {
         let delayed = current_frame + frame_delay;
         if delayed >= self.frames.len() {
             return Err(format!(
@@ -116,6 +116,7 @@ impl Camera {
 
         let (width, height) = img_a.dimensions();
         let mut result: RgbImage = RgbImage::new(width, height);
+        let mut noise: u32 = 0;
 
         for (x, y, pixel) in result.enumerate_pixels_mut() {
             let Rgb([ar, ag, ab]) = *img_a.get_pixel(x, y);
@@ -124,6 +125,7 @@ impl Camera {
             let g = ag.abs_diff(bg);
             let b = ab.abs_diff(bb);
             let gray = ((r as u16 + g as u16 + b as u16) / 3) as u8;
+            noise+= gray as u32;
             *pixel = Rgb([gray, gray, gray]);
         }
 
@@ -133,52 +135,52 @@ impl Camera {
             .ok_or_else(|| "Could not determine output path".to_string())?;
         result.save(&out_path).map_err(|e| e.to_string())?;
 
-        Ok(result)
+        Ok((result,noise))
     }
 
     pub fn make_vec(&self, current_frame: usize, frame_delay: usize,cam: u32) -> Vec<Ray> { // for each non black pixel contruct a ray;
         let image_diff = self.move_diff_image(current_frame, frame_delay);
 
-        let mut image_diff = match image_diff {
+        let  ( mut image_diff,intensity) = match image_diff {
             Ok(val) => val,
             Err(e) => panic!("image_diff not successfully created{}", e),
         };
         // makes a canvas that is 1z from the camera away and then draw a ray to each pixel:
         let y_scale: f32 =  ((self.fov/360.0*2.0*PI)/2.0).tan();
+        let ratio: f32 = image_diff.width()as f32/image_diff.height() as f32;
         
-        let x_scale: f32 = y_scale * self.ratio;
+        let x_scale: f32 = y_scale * ratio;
         let z_dir: f32 = 1.0;
         let height: f32 = image_diff.height() as f32/2.0;
         let width: f32 = image_diff.width()as f32/2.0;
-        let mut noise = 0;
+       
         let rotation = Quat::from_euler(
                     EulerRot::YXZ,
                     self.rot.y/360.0*2.0*PI,
                     self.rot.x/360.0*2.0*PI,
                     self.rot.z/360.0*2.0*PI,
                 );
+        let intensity= intensity as f32/ image_diff.height() as f32/ image_diff.width()as f32*(1.0/self.sensitivity) as f32;
         
+        
+        if intensity>255.0 {return vec![] }
         let mut ray_in_image: Vec<Ray> = Vec::new();
         for (x, y, pixel) in image_diff.enumerate_pixels_mut() {
             let Rgb([r, _g, _b]) = *pixel;
-            if r > self.sensitivity as u8 {
+            if r > intensity as u8 {
               
                 let x_dir = ((x as f32 - width)/width)*x_scale;
                 let y_dir = ((-(y as f32 - height)/height))*y_scale;
                 // LH Y-up: negate Y and Z angles (glam uses RH convention)
                 
                 let dir = rotation * Vec3::new(x_dir, y_dir, z_dir);
-                noise+=1;
-                ray_in_image.push( Ray{ dir:dir, pos: self.pos,intens: r as f32,cam:cam});
+                
+                ray_in_image.push( Ray{ dir:dir, pos: self.pos,cam:cam});
 
             }
         }
           
         
-        for  ray in &mut ray_in_image{
-            ray.intens=ray.intens/(noise as f32);
-          
-        }
 
         ray_in_image
     }
@@ -188,7 +190,6 @@ impl Camera {
 pub struct Ray {
     pub pos: Vec3,
     pub dir: Vec3,
-    pub intens: f32,
     pub cam: u32,
 }
 
