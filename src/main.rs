@@ -5,7 +5,7 @@ use detect::DetectConfig;
 
 fn main() {
     env_logger::init();
-    let scale = 1.0;
+    let scale = 0.1;
     let mut detecting = Detect::new(DetectConfig {
         min_cube_size: scale,
         analyze_pos: Vec3::new(-200.0, 0.0, -200.0),
@@ -13,7 +13,7 @@ fn main() {
         directory: r"images/Active".to_owned(),
         min_cameras: 3,
         result_capture_distance: scale * 10.0,
-        sensitivity: 0.001,
+        sensitivity: 0.01,
         max_cube_number: 10,
         out_folder: r"output".to_owned(),
     });

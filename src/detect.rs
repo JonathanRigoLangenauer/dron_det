@@ -235,15 +235,16 @@ impl Detect {
 
         let mut results: Vec<Res> = Vec::new();
         self.voxel
-            .sort_by(|a, b| a.num_cameras.total_cmp(&b.num_cameras));
+            .sort_by(|a, b| b.num_cameras.total_cmp(&a.num_cameras));
+        self.voxel.truncate(self.max_cube_number as usize);
+        self.voxel.reverse();
         for b in &self.voxel {
             self.add_res(&mut results, b.pos, b.num_cameras);
         }
         results.sort_by(|a, b| a.num_cameras.total_cmp(&b.num_cameras));
         self.res_compress(&mut results);
 
-        self.voxel.reverse();
-        self.voxel.truncate(self.max_cube_number as usize);
+        
 
         results
     }
