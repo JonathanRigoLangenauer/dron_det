@@ -10,7 +10,7 @@ fn main() {
         min_cube_size: scale,
         analyze_pos: Vec3::new(-200.0, 0.0, -200.0),
         analyze_size: 500.0,
-        directory: r"images\Active".to_owned(),
+        directory: r"images/Active".to_owned(),
         min_cameras: 3,
         result_capture_distance: scale * 10.0,
         sensitivity: 0.001,
