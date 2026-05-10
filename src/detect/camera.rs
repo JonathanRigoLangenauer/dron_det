@@ -1,8 +1,8 @@
 use glam::{EulerRot, Quat, Vec3};
 use image::{ImageReader, Rgb, RgbImage};
+use std::f32::consts::PI;
 use std::fs;
 use std::path::PathBuf;
-use std::f32::consts::PI;
 
 pub struct Camera {
     pub pos: Vec3,
@@ -10,11 +10,10 @@ pub struct Camera {
     pub fov: f32,
     pub frames: Vec<PathBuf>,
     pub sensitivity: f32,
-   
 }
 
 impl Camera {
-    pub fn from_folder_name(parent: &str, name: &str) -> Option<Camera> {
+    pub fn from_folder_name(parent: &str, name: &str, sensitivity: f32) -> Option<Camera> {
         if !name.starts_with("Cam_") {
             return None;
         }
@@ -80,16 +79,15 @@ impl Camera {
             },
             fov: fov?,
             frames,
-            sensitivity: 0.01,// how many pixels of a image can be made to rays
-          
+            sensitivity: sensitivity, // noise threshold and a maximum of width*height*sensitivity pixels will be made to rays
         })
     }
-
+    /// constructs the difference between two images
     pub fn move_diff_image(
         &self,
         current_frame: usize,
         frame_delay: usize,
-    ) -> Result<(RgbImage,u32), String> {
+    ) -> Result<(RgbImage, u32), String> {
         let delayed = current_frame + frame_delay;
         if delayed >= self.frames.len() {
             return Err(format!(
@@ -125,62 +123,62 @@ impl Camera {
             let g = ag.abs_diff(bg);
             let b = ab.abs_diff(bb);
             let gray = ((r as u16 + g as u16 + b as u16) / 3) as u8;
-            noise+= gray as u32;
+            noise += gray as u32;
             *pixel = Rgb([gray, gray, gray]);
         }
 
-        let out_path = self.frames[current_frame]
-            .parent()
-            .map(|p| p.join(format!("diff_{}_{}.png", current_frame, delayed)))
-            .ok_or_else(|| "Could not determine output path".to_string())?;
-        result.save(&out_path).map_err(|e| e.to_string())?;
-
-        Ok((result,noise))
+        Ok((result, noise))
     }
 
-    pub fn make_vec(&self, current_frame: usize, frame_delay: usize,cam: u32) -> Vec<Ray> { // for each non black pixel contruct a ray;
+    pub fn make_rays(&self, current_frame: usize, frame_delay: usize, cam: u32) -> Vec<Ray> {
+        // for each non black pixel contruct a ray;
         let image_diff = self.move_diff_image(current_frame, frame_delay);
 
-        let  ( mut image_diff,intensity) = match image_diff {
+        let (mut image_diff, intensity) = match image_diff {
             Ok(val) => val,
-            Err(e) => panic!("image_diff not successfully created{}", e),
+            Err(e) => {
+                eprintln!("Warning: image_diff not successfully created: {}", e);
+                return vec![];
+            }
         };
         // makes a canvas that is 1z from the camera away and then draw a ray to each pixel:
-        let y_scale: f32 =  ((self.fov/360.0*2.0*PI)/2.0).tan();
-        let ratio: f32 = image_diff.width()as f32/image_diff.height() as f32;
-        
+        let y_scale: f32 = ((self.fov / 360.0 * 2.0 * PI) / 2.0).tan();
+        let ratio: f32 = image_diff.width() as f32 / image_diff.height() as f32;
+
         let x_scale: f32 = y_scale * ratio;
         let z_dir: f32 = 1.0;
-        let height: f32 = image_diff.height() as f32/2.0;
-        let width: f32 = image_diff.width()as f32/2.0;
-       
+        let height: f32 = image_diff.height() as f32 / 2.0;
+        let width: f32 = image_diff.width() as f32 / 2.0;
+
         let rotation = Quat::from_euler(
-                    EulerRot::YXZ,
-                    self.rot.y/360.0*2.0*PI,
-                    self.rot.x/360.0*2.0*PI,
-                    self.rot.z/360.0*2.0*PI,
-                );
-        let intensity= intensity as f32/ image_diff.height() as f32/ image_diff.width()as f32*(1.0/self.sensitivity) as f32;
-        
-        
-        if intensity>255.0 {return vec![] }
+            EulerRot::YXZ,
+            self.rot.y / 360.0 * 2.0 * PI,
+            self.rot.x / 360.0 * 2.0 * PI,
+            self.rot.z / 360.0 * 2.0 * PI,
+        );
+        let cut_off_sensitivity = intensity as f32 / image_diff.height() as f32 / image_diff.width() as f32
+            * (1.0 / self.sensitivity) as f32;
+
+        if cut_off_sensitivity > 255.0 {
+            return vec![];
+        }
         let mut ray_in_image: Vec<Ray> = Vec::new();
         for (x, y, pixel) in image_diff.enumerate_pixels_mut() {
             let Rgb([r, _g, _b]) = *pixel;
-            if r > intensity as u8 {
-              
-                let x_dir = ((x as f32 - width)/width)*x_scale;
-                let y_dir = ((-(y as f32 - height)/height))*y_scale;
+            if r > cut_off_sensitivity as u8 {
+                let x_dir = ((x as f32 - width) / width) * x_scale;
+                let y_dir = (-(y as f32 - height) / height) * y_scale;
                 // LH Y-up: negate Y and Z angles (glam uses RH convention)
-                
-                let dir = rotation * Vec3::new(x_dir, y_dir, z_dir);
-                
-                ray_in_image.push( Ray{ dir:dir, pos: self.pos,cam:cam});
 
+                let dir = rotation * Vec3::new(x_dir, y_dir, z_dir);
+
+                ray_in_image.push(Ray {
+                    dir: dir,
+                    pos: self.pos,
+                    cam: cam,
+                });
             }
         }
-          
-        
 
         ray_in_image
     }
@@ -193,18 +191,16 @@ pub struct Ray {
     pub cam: u32,
 }
 
-
-impl Ray{
-
+impl Ray {
+    /// finds if a ray hits a cube
     pub fn hit_aabb(&self, pos: Vec3, size: f32) -> bool {
-    let aabb_min = pos;
-    let aabb_max = pos + Vec3::splat(size);
-    let inv_dir = 1.0 / &self.dir;
-    let t1 = (aabb_min - &self.pos) * inv_dir;
-    let t2 = (aabb_max - &self.pos) * inv_dir;
-    let tmin = t1.min(t2).max_element();
-    let tmax = t1.max(t2).min_element();
-    tmax >= tmin && tmax >= 0.0
-
-}
+        let aabb_min = pos;
+        let aabb_max = pos + Vec3::splat(size);
+        let inv_dir = 1.0 / self.dir;
+        let t1 = (aabb_min - &self.pos) * inv_dir;
+        let t2 = (aabb_max - &self.pos) * inv_dir;
+        let tmin = t1.min(t2).max_element();
+        let tmax = t1.max(t2).min_element();
+        tmax >= tmin && tmax >= 0.0
+    }
 }
